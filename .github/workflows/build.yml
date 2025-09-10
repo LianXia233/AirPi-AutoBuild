@@ -29,14 +29,14 @@ jobs:
           libssl-dev xsltproc zlib1g-dev unzip file wget curl git python3 python3-pip \
           ccache golang libglib2.0-dev libusb-1.0-0-dev libqrencode-dev \
           libprotobuf-c-dev jq autoconf automake libtool pkg-config
+          sudo apt-get clean
 
       # 3️⃣ ccache 缓存
       - name: Cache ccache
         uses: actions/cache@v3
         with:
-          path: |
-            ~/.ccache
-          key: ${{ runner.os }}-ccache-${{ hashFiles('**/Makefile') }}
+          path: ~/.ccache
+          key: ${{ runner.os }}-ccache-${{ hashFiles('**/Makefile', '**/*.c', '**/*.h') }}
           restore-keys: |
             ${{ runner.os }}-ccache-
 
