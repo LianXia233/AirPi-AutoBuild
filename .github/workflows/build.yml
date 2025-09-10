@@ -6,13 +6,14 @@ on:
       - main
   workflow_dispatch:
   schedule:
-    - cron: "0 3 * * *"  # 每天 UTC 3 点执行
+    - cron: "0 3 * * *"  # 每天 UTC 3 点 (北京时间 11 点)
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
+      # 1️⃣ Checkout ImmortalWrt 源码
       - name: Checkout ImmortalWrt
         uses: actions/checkout@v4
         with:
@@ -20,6 +21,7 @@ jobs:
           ref: openwrt-24.10-6.6
           fetch-depth: 0
 
+      # 2️⃣ 安装依赖
       - name: Install dependencies
         run: |
           sudo apt update
@@ -28,6 +30,7 @@ jobs:
           ccache golang libglib2.0-dev libusb-1.0-0-dev libqrencode-dev \
           protobuf-c-compiler protobuf-c-dev jq
 
+      # 3️⃣ 缓存 ccache 加速
       - name: Cache ccache
         uses: actions/cache@v3
         with:
@@ -37,21 +40,25 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-ccache-
 
+      # 4️⃣ 初始化 feeds
       - name: Initialize feeds
         run: |
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
+      # 5️⃣ 应用自定义 DTS
       - name: Apply custom DTS
         run: |
           mkdir -p target/linux/mediatek/dts
           cp dts/mt7981b-Airpi-emmc16G.dts target/linux/mediatek/dts/
 
+      # 6️⃣ 运行 diy.sh 添加插件
       - name: Run diy.sh
         run: |
           chmod +x diy.sh
           ./diy.sh
 
+      # 7️⃣ 配置目标设备
       - name: Configure target
         run: |
           rm -f .config
@@ -64,16 +71,25 @@ jobs:
           EOF
           make defconfig
 
+      # 8️⃣ 构建固件
       - name: Build firmware
         run: |
           make -j$(nproc) V=s || make -j1 V=s
 
+      # 9️⃣ 上传构建产物（Artifact）v4
       - name: Upload firmware
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: firmware
           path: bin/targets/
 
+      - name: Upload packages-extra
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-extra
+          path: bin/packages/
+
+      # 🔟 创建 Release
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
@@ -83,9 +99,11 @@ jobs:
           prerelease: false
           files: |
             bin/targets/**/*
+            bin/packages/**/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # 1️⃣1️⃣ 删除旧 Release，只保留最新 3 个
       - name: Delete old releases (keep last 3)
         uses: dev-drprasad/delete-older-releases@v0.3.3
         with:
