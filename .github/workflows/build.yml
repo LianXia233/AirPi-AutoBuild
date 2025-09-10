@@ -1,0 +1,95 @@
+name: Build ImmortalWrt AirPi
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * *"  # 每天 UTC 3 点执行
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout ImmortalWrt
+        uses: actions/checkout@v4
+        with:
+          repository: padavanonly/immortalwrt-mt798x-6.6
+          ref: openwrt-24.10-6.6
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential libncurses-dev gawk gettext \
+          libssl-dev xsltproc zlib1g-dev unzip file wget curl git python3 python3-pip \
+          ccache golang libglib2.0-dev libusb-1.0-0-dev libqrencode-dev \
+          protobuf-c-compiler protobuf-c-dev jq
+
+      - name: Cache ccache
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.ccache
+          key: ${{ runner.os }}-ccache-${{ hashFiles('**/Makefile') }}
+          restore-keys: |
+            ${{ runner.os }}-ccache-
+
+      - name: Initialize feeds
+        run: |
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Apply custom DTS
+        run: |
+          mkdir -p target/linux/mediatek/dts
+          cp dts/mt7981b-Airpi-emmc16G.dts target/linux/mediatek/dts/
+
+      - name: Run diy.sh
+        run: |
+          chmod +x diy.sh
+          ./diy.sh
+
+      - name: Configure target
+        run: |
+          rm -f .config
+          cat >> .config <<EOF
+          CONFIG_TARGET_mediatek=y
+          CONFIG_TARGET_mediatek_filogic=y
+          CONFIG_TARGET_mediatek_filogic_DEVICE_mt7981b-Airpi-emmc16G=y
+          CONFIG_PACKAGE_qmodem=y
+          CONFIG_PACKAGE_homeproxy=y
+          EOF
+          make defconfig
+
+      - name: Build firmware
+        run: |
+          make -j$(nproc) V=s || make -j1 V=s
+
+      - name: Upload firmware
+        uses: actions/upload-artifact@v3
+        with:
+          name: firmware
+          path: bin/targets/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: airpi-${{ github.run_number }}
+          name: "AirPi Build #${{ github.run_number }}"
+          draft: false
+          prerelease: false
+          files: |
+            bin/targets/**/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Delete old releases (keep last 3)
+        uses: dev-drprasad/delete-older-releases@v0.3.3
+        with:
+          keep_latest: 3
+          delete_tags: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
