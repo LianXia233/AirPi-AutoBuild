@@ -38,6 +38,9 @@ UPDATE_PACKAGE "qmodem" "FUjr/QModem" "main" "pkg"
 # HomeProxy
 UPDATE_PACKAGE "homeproxy" "immortalwrt/homeproxy" "main" "pkg"
 
+# Argon 主题
+UPDATE_PACKAGE "argon" "sbwml/luci-theme-argon" "openwrt-24.10-6.6"
+
 # modem_feeds
 if ! grep -q "src-git modem" feeds.conf.default; then
     echo 'src-git modem https://github.com/FUjr/modem_feeds.git;main' >> feeds.conf.default
