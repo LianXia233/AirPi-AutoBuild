@@ -6,7 +6,7 @@ on:
       - main
   workflow_dispatch:
   schedule:
-    - cron: "0 3 * * *"  # 每天 UTC 3 点 (北京时间 11 点)
+    - cron: "0 3 * * *"
 
 jobs:
   build:
@@ -21,16 +21,16 @@ jobs:
           ref: openwrt-24.10-6.6
           fetch-depth: 0
 
-      # 2️⃣ 安装依赖
-      - name: Install dependencies
+      # 2️⃣ 安装依赖 (兼容 Ubuntu 22.04)
+      - name: 安装依赖
         run: |
-          sudo apt update
-          sudo apt install -y build-essential libncurses-dev gawk gettext \
+          sudo apt-get update
+          sudo apt-get install -y build-essential libncurses-dev gawk gettext \
           libssl-dev xsltproc zlib1g-dev unzip file wget curl git python3 python3-pip \
           ccache golang libglib2.0-dev libusb-1.0-0-dev libqrencode-dev \
-          protobuf-c-compiler protobuf-c-dev jq
+          libprotobuf-c-dev jq autoconf automake libtool pkg-config
 
-      # 3️⃣ 缓存 ccache 加速
+      # 3️⃣ ccache 缓存
       - name: Cache ccache
         uses: actions/cache@v3
         with:
@@ -52,7 +52,7 @@ jobs:
           mkdir -p target/linux/mediatek/dts
           cp dts/mt7981b-Airpi-emmc16G.dts target/linux/mediatek/dts/
 
-      # 6️⃣ 运行 diy.sh 添加插件
+      # 6️⃣ 运行 diy.sh
       - name: Run diy.sh
         run: |
           chmod +x diy.sh
@@ -71,12 +71,12 @@ jobs:
           EOF
           make defconfig
 
-      # 8️⃣ 构建固件
+      # 8️⃣ 编译固件
       - name: Build firmware
         run: |
           make -j$(nproc) V=s || make -j1 V=s
 
-      # 9️⃣ 上传构建产物（Artifact）v4
+      # 9️⃣ 上传构建产物
       - name: Upload firmware
         uses: actions/upload-artifact@v4
         with:
@@ -103,8 +103,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # 1️⃣1️⃣ 删除旧 Release，只保留最新 3 个
-      - name: Delete old releases (keep last 3)
+      # 1️⃣1️⃣ 保留最新 3 个 Release
+      - name: Delete old releases
         uses: dev-drprasad/delete-older-releases@v0.3.3
         with:
           keep_latest: 3
