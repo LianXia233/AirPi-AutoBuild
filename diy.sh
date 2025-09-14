@@ -15,38 +15,34 @@ UPDATE_PACKAGE() {
     local PKG_SPECIAL="$4"
     local REPO_NAME="${PKG_REPO#*/}"
 
-    # 删除本地可能存在的同名包
-    find ../feeds/luci/ ../feeds/packages/ -maxdepth 3 -type d -iname "*${PKG_NAME}*" -exec rm -rf {} +
+    if [ -z "$PKG_NAME" ] || [ -z "$PKG_REPO" ] || [ -z "$PKG_BRANCH" ]; then
+        echo "UPDATE_PACKAGE 参数不足"
+        exit 1
+    fi
 
-    # 克隆 GitHub 仓库
-    git clone --depth=1 --single-branch --branch "$PKG_BRANCH" "https://github.com/${PKG_REPO}.git"
+    echo "删除本地旧包: $PKG_NAME"
+    find ../feeds/luci/ ../feeds/packages/ -maxdepth 3 -type d -name "$PKG_NAME" -exec rm -rf {} +
 
-    # 如果是 pkg，则从大杂烩中提取插件目录
+    echo "克隆插件: $PKG_REPO"
+    git clone --depth=1 --single-branch --branch "$PKG_BRANCH" "https://github.com/${PKG_REPO}.git" || {
+        echo "Clone $PKG_REPO failed!"
+        exit 1
+    }
+
     if [[ "$PKG_SPECIAL" == "pkg" ]]; then
-        find "./${REPO_NAME}/"*/ -maxdepth 3 -type d -iname "*${PKG_NAME}*" -prune -exec cp -rf {} ./ \;
+        find "./${REPO_NAME}/" -maxdepth 3 -type d -name "$PKG_NAME" -prune -exec cp -rf {} ./ \;
         rm -rf "./${REPO_NAME}/"
     fi
 }
 
-# =======================
 # 添加插件
-# =======================
-
-# QModem
 UPDATE_PACKAGE "qmodem" "FUjr/QModem" "main" "pkg"
-
-# HomeProxy
 UPDATE_PACKAGE "homeproxy" "immortalwrt/homeproxy" "main" "pkg"
-
-# Argon 主题
 UPDATE_PACKAGE "argon" "sbwml/luci-theme-argon" "openwrt-24.10-6.6"
 
-# modem_feeds
 if ! grep -q "src-git modem" feeds.conf.default; then
     echo 'src-git modem https://github.com/FUjr/modem_feeds.git;main' >> feeds.conf.default
 fi
-./scripts/feeds update modem || true
-./scripts/feeds install -a -p modem || true
-./scripts/feeds install -a -f -p modem || true
+./scripts/feeds update modem && ./scripts/feeds install -a -p modem
 
 echo "=== DIY Script Finished ==="
