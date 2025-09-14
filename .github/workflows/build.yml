@@ -8,61 +8,109 @@ on:
   schedule:
     - cron: "0 3 * * *"
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ Checkout ImmortalWrt 源码
+      # 0️⃣ 检出本仓库（用于获取 dts/ 与 diy.sh）
+      - name: Checkout AirPi-AutoBuild
+        uses: actions/checkout@v4
+        with:
+          path: builder
+
+      # 1️⃣ 检出 ImmortalWrt 源码到 ./source
       - name: Checkout ImmortalWrt
         uses: actions/checkout@v4
         with:
           repository: padavanonly/immortalwrt-mt798x-6.6
           ref: openwrt-24.10-6.6
           fetch-depth: 0
+          path: source
 
-      # 2️⃣ 安装依赖 (兼容 Ubuntu 22.04)
+      # 2️⃣ 安装依赖
       - name: 安装依赖
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential libncurses-dev gawk gettext \
-          libssl-dev xsltproc zlib1g-dev unzip file wget curl git python3 python3-pip \
-          ccache golang libglib2.0-dev libusb-1.0-0-dev libqrencode-dev \
-          libprotobuf-c-dev jq autoconf automake libtool pkg-config
+            libssl-dev xsltproc zlib1g-dev unzip file wget curl git python3 python3-pip \
+            ccache golang libglib2.0-dev libusb-1.0-0-dev libqrencode-dev \
+            libprotobuf-c-dev jq autoconf automake libtool pkg-config
           sudo apt-get clean
 
-      # 3️⃣ ccache 缓存
+      # 3️⃣ ccache 缓存与初始化
       - name: Cache ccache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ~/.ccache
-          key: ${{ runner.os }}-ccache-${{ hashFiles('**/Makefile', '**/*.c', '**/*.h') }}
+          key: ${{ runner.os }}-ccache-${{ hashFiles('source/**/Makefile', 'source/**/*.c', 'source/**/*.h') }}
           restore-keys: |
             ${{ runner.os }}-ccache-
 
+      - name: Init ccache
+        run: |
+          mkdir -p ~/.ccache
+          echo "CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
+          echo "CCACHE_COMPRESS=1" >> $GITHUB_ENV
+          echo "CCACHE_COMPRESSLEVEL=6" >> $GITHUB_ENV
+          echo "CCACHE_MAXSIZE=5G" >> $GITHUB_ENV
+          ccache -M 5G || true
+
+      # （可选）缓存 OpenWrt 下载目录以加速构建
+      - name: Cache OpenWrt downloads
+        uses: actions/cache@v4
+        with:
+          path: source/dl
+          key: ${{ runner.os }}-openwrt-dl-${{ hashFiles('source/feeds.conf.default') }}
+          restore-keys: |
+            ${{ runner.os }}-openwrt-dl-
+
       # 4️⃣ 初始化 feeds
       - name: Initialize feeds
+        working-directory: source
         run: |
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      # 5️⃣ 应用自定义 DTS
+      # 5️⃣ 应用自定义 DTS（自动探测常见目录）
       - name: Apply custom DTS
+        working-directory: source
         run: |
-          mkdir -p target/linux/mediatek/dts
-          cp dts/mt7981b-Airpi-emmc16G.dts target/linux/mediatek/dts/
+          set -eu
+          CANDIDATES=(
+            target/linux/mediatek/files-6.6/arch/arm64/boot/dts/mediatek
+            target/linux/mediatek/dts
+          )
+          DST=""
+          for d in "${CANDIDATES[@]}"; do
+            if [ -d "$d" ]; then
+              DST="$d"
+              break
+            fi
+          done
+          if [ -z "$DST" ]; then
+            echo "No suitable DTS directory found" >&2
+            exit 1
+          fi
+          mkdir -p "$DST"
+          cp ../builder/dts/mt7981b-Airpi-emmc16G.dts "$DST/"
 
-      # 6️⃣ 运行 diy.sh
+      # 6️⃣ 运行 diy.sh（通常需在源码根执行）
       - name: Run diy.sh
+        working-directory: source
         run: |
-          chmod +x diy.sh
-          ./diy.sh
+          chmod +x ../builder/diy.sh
+          ../builder/diy.sh
 
       # 7️⃣ 配置目标设备
       - name: Configure target
+        working-directory: source
         run: |
           rm -f .config
-          cat >> .config <<EOF
+          cat >> .config <<'EOF'
           CONFIG_TARGET_mediatek=y
           CONFIG_TARGET_mediatek_filogic=y
           CONFIG_TARGET_mediatek_filogic_DEVICE_mt7981b-Airpi-emmc16G=y
@@ -73,21 +121,25 @@ jobs:
 
       # 8️⃣ 编译固件
       - name: Build firmware
+        working-directory: source
+        env:
+          CCACHE_DIR: ${{ env.CCACHE_DIR }}
+          CCACHE_COMPRESS: ${{ env.CCACHE_COMPRESS }}
         run: |
-          make -j$(nproc) V=s || make -j1 V=s
+          make -j"$(nproc)" V=s || make -j1 V=s
 
       # 9️⃣ 上传构建产物
       - name: Upload firmware
         uses: actions/upload-artifact@v4
         with:
           name: firmware
-          path: bin/targets/
+          path: source/bin/targets/
 
       - name: Upload packages-extra
         uses: actions/upload-artifact@v4
         with:
           name: packages-extra
-          path: bin/packages/
+          path: source/bin/packages/
 
       # 🔟 创建 Release
       - name: Create GitHub Release
@@ -98,12 +150,12 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            bin/targets/**/*
-            bin/packages/**/*
+            source/bin/targets/**/*
+            source/bin/packages/**/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # 1️⃣1️⃣ 保留最新 3 个 Release
+      # 1️⃣1️⃣ 仅保留最近 3 个 Release（同时删除对应 tag）
       - name: Delete old releases
         uses: dev-drprasad/delete-older-releases@v0.3.3
         with:
